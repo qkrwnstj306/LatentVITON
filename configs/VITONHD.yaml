@@ -26,6 +26,7 @@ model:
     use_attn_mask: False
     mask1_key: "gt_cloth_warped_mask"
     mask2_key: "agn_mask"
+    pbe_train_mode: True
 
     control_stage_config:
       target: cldm.warping_cldm_network.NoZeroConvControlNet
@@ -91,7 +92,7 @@ model:
       scale: 1.0
 
     cond_stage_config:
-      target: ldm.modules.image_encoders.modules.FrozenCLIPImageEmbedder
+      target: ldm.modules.image_encoders.modules.DINOv2ImageEmbedder
 dataset_name: VITONHDDataset
 resume_path: ./ckpts/VITONHD_PBE_pose.ckpt
 default_prompt: ""
