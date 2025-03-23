@@ -1,0 +1,25 @@
+* FID on Unpair dataset
+
+Use Inception V3
+
+E.g., 
+pip install pytorch-fid
+python -m pytorch_fid /home/qkrwnstj/StableVITON/dataset/zalando-hd-resized/test/image /home/qkrwnstj/StableVITON/stableVITON/unpair
+
+--batch-size 50
+--device cuda:0
+--dims 64/192/768/2048
+
+
+* KID
+kid_eval_pytorch.py
+
+* SSIM, LPIPS
+
+lpips_eval / _for_GPVTON
+ssim_eval / _for_GPVTON
+
+* LADI-VTON
+
+- For inference, 
+python src/inference.py --dataset vitonhd --vitonhd_dataroot ~/comparison/HR-VITON/data/zalando-hd-resized/ --output_dir ~/comparison/ladi-vton/results --test_order unpaired --mixed_precision fp16 --enable_xformers_memory_efficient_attention --use_png --compute_metrics

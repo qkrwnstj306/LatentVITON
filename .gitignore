@@ -4,6 +4,14 @@
 ### Linux ###
 *~
 
+### dir ###
+ours
+ours_latents
+original
+results
+stableVITON
+dataset
+
 #### jho >>>>
 DATA
 *.ckpt

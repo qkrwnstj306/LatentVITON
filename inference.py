@@ -10,15 +10,18 @@ import torch
 from torch.utils.data import DataLoader
 
 from cldm.plms_hacked import PLMSSampler
+from ldm.models.diffusion.ddim import DDIMSampler
 from cldm.model import create_model
 from utils import tensor2img
+
+from pytorch_lightning import seed_everything
 
 def build_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--config_path", type=str)
     parser.add_argument("--model_load_path", type=str)
     parser.add_argument("--batch_size", type=int, default=16)
-    parser.add_argument("--data_root_dir", type=str, default="./DATA/zalando-hd-resized")
+    parser.add_argument("--data_root_dir", type=str, default="./dataset/zalando-hd-resized")
     parser.add_argument("--repaint", action="store_true")
     parser.add_argument("--unpair", action="store_true")
     parser.add_argument("--save_dir", type=str, default="./samples")
@@ -27,12 +30,16 @@ def build_args():
     parser.add_argument("--img_H", type=int, default=512)
     parser.add_argument("--img_W", type=int, default=384)
     parser.add_argument("--eta", type=float, default=0.0)
+    
+    parser.add_argument("--seed", type=int, default=23)
     args = parser.parse_args()
     return args
 
 
 @torch.no_grad()
 def main(args):
+    seed_everything(args.seed)
+    
     batch_size = args.batch_size
     img_H = args.img_H
     img_W = args.img_W
@@ -49,7 +56,9 @@ def main(args):
     model = model.cuda()
     model.eval()
 
-    sampler = PLMSSampler(model)
+    '''Choose sampler among PLMS and DDIM'''
+    #sampler = PLMSSampler(model)
+    sampler = DDIMSampler(model)
     dataset = getattr(import_module("dataset"), config.dataset_name)(
         data_root_dir=args.data_root_dir,
         img_H=img_H,
@@ -65,7 +74,12 @@ def main(args):
     os.makedirs(save_dir, exist_ok=True)
     for batch_idx, batch in enumerate(dataloader):
         print(f"{batch_idx}/{len(dataloader)}")
+        # z: [BS, 4, 64, 48], c.keys(): 'c_crossattn', 'c_concat', 'first_stage_cond'
+        # c_crossattn[0]: [BS, 3, 224, 244] for CLIP Image Encoder
+        # c_concat[0]: [BS, 3, 512, 384] for ControlNet Input
+        # first_stage_cond[BS]: [9, 64, 48] -> agnostic map: [4, 64, 48], resized mask: [1, 64, 48], pose: [4, 64, 48]
         z, c = model.get_input(batch, params.first_stage_key)
+        
         bs = z.shape[0]
         c_crossattn = c["c_crossattn"][0][:bs]
         if c_crossattn.ndim == 4:
@@ -80,8 +94,25 @@ def main(args):
         sampler.model.batch = batch
 
         ts = torch.full((1,), 999, device=z.device, dtype=torch.long)
-        start_code = model.q_sample(z, ts)     
-
+        mask = None
+        # '''Alleviate SNR for x_T'''
+        # start_code = model.q_sample(z, ts) 
+        
+        # '''Orignal x_T'''
+        # C, H, W = shape
+        # size = (bs, C, H, W)
+        # start_code = torch.randn(size, device=z.device)
+        
+        '''Alleviate SNR for x_T using only agnostic_mask'''
+        C, H, W = shape
+        size = (bs, C, H, W)
+        start_code = torch.randn(size, device=z.device)
+        alleviated_start_code = model.q_sample(z, ts) 
+        agnostic_mask_inversion = torch.cat([c["first_stage_cond"]], dim=1)[:, 4, ...].unsqueeze(1) # agnostic_mask_inversion: [BS, 1, 64, 48], unmasked region set to 1
+        start_code = start_code * (1. - agnostic_mask_inversion) + alleviated_start_code * agnostic_mask_inversion
+        mask = agnostic_mask_inversion
+        
+        
         samples, _, _ = sampler.sample(
             args.denoise_steps,
             bs,
@@ -91,6 +122,8 @@ def main(args):
             verbose=False,
             eta=args.eta,
             unconditional_conditioning=uc_full,
+            mask=mask,
+            x0=z
         )
 
         x_samples = model.decode_first_stage(samples)
