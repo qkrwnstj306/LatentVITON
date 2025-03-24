@@ -37,6 +37,7 @@ CUDA_VISIBLE_DEVICES=0 python inference.py \
  --model_load_path ./ckpts/VITONHD.ckpt \
  --img_callback
 
-python run_feature_pca.py \
+CUDA_VISIBLE_DEVICES=1 python run_feature_pca.py \
  --reduce_method pca \
- --time_step 49
+ --time_step 0 \
+ --feature_pth ./feature_map

@@ -99,10 +99,10 @@ def main(args):
         # '''Alleviate SNR for x_T'''
         # start_code = model.q_sample(z, ts) 
         
-        # '''Orignal x_T'''
-        # C, H, W = shape
-        # size = (bs, C, H, W)
-        # start_code = torch.randn(size, device=z.device)
+        '''Orignal x_T'''
+        C, H, W = shape
+        size = (bs, C, H, W)
+        start_code = torch.randn(size, device=z.device)
         
         # '''Alleviate SNR for x_T using only agnostic_mask'''
         # C, H, W = shape
@@ -113,10 +113,10 @@ def main(args):
         # start_code = start_code * (1. - agnostic_mask_inversion) + alleviated_start_code * agnostic_mask_inversion
         # mask = agnostic_mask_inversion
 
-        '''StableVITON + Ours'''
-        start_code = model.q_sample(z, ts) 
-        agnostic_mask_inversion = torch.cat([c["first_stage_cond"]], dim=1)[:, 4, ...].unsqueeze(1) # agnostic_mask_inversion: [BS, 1, 64, 48], unmasked region set to 1
-        mask = agnostic_mask_inversion
+        # '''StableVITON + Ours'''
+        # start_code = model.q_sample(z, ts) 
+        # agnostic_mask_inversion = torch.cat([c["first_stage_cond"]], dim=1)[:, 4, ...].unsqueeze(1) # agnostic_mask_inversion: [BS, 1, 64, 48], unmasked region set to 1
+        # mask = agnostic_mask_inversion
         
         img_callback_fn = None
         if args.img_callback:

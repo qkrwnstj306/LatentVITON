@@ -57,15 +57,16 @@ def visualize_and_save_features_pca(feature_maps_fit_data,feature_maps_transform
     feature_maps_pca = feature_maps_pca.reshape(len(file_names), -1, 3)  # B x (H * W) x 3
     for i, file_name in enumerate(file_names):
         pca_img = feature_maps_pca[i]  # (H * W) x 3
+        
         w = int(sqrt(pca_img.shape[0] * 3 / 4))
         h = int(w * 4 / 3)
-        
+
         pca_img = pca_img.reshape(h, w, 3)
         pca_img_min = pca_img.min(axis=(0, 1))
         pca_img_max = pca_img.max(axis=(0, 1))
         pca_img = (pca_img - pca_img_min) / (pca_img_max - pca_img_min)
         pca_img = Image.fromarray((pca_img * 255).astype(np.uint8))
-        pca_img = T.Resize(512, interpolation=T.InterpolationMode.BICUBIC)(pca_img)
+        pca_img = T.Resize((512,384), interpolation=T.InterpolationMode.BICUBIC)(pca_img)
         pca_img.save(os.path.join(save_dir, f"{file_name}.png"))
         
 @torch.no_grad()
@@ -87,7 +88,7 @@ def visualize_and_save_features_tsne(feature_maps_fit_data, feature_maps_transfo
         tsne_img_max = tsne_img.max(axis=(0, 1))
         tsne_img = (tsne_img - tsne_img_min) / (tsne_img_max - tsne_img_min)
         tsne_img = Image.fromarray((tsne_img * 255).astype(np.uint8))
-        tsne_img = T.Resize((512), interpolation=T.InterpolationMode.BICUBIC)(tsne_img)
+        tsne_img = T.Resize((512,384), interpolation=T.InterpolationMode.BICUBIC)(tsne_img)
         tsne_img.save(os.path.join(save_dir, f"batch-{experiment}_time_{t}.png"))
         
 @torch.no_grad()
@@ -109,5 +110,5 @@ def visualize_and_save_features_umap(feature_maps_fit_data, feature_maps_transfo
         umap_img_max = umap_img.max(axis=(0, 1))
         umap_img = (umap_img - umap_img_min) / (umap_img_max - umap_img_min)
         umap_img = Image.fromarray((umap_img * 255).astype(np.uint8))
-        umap_img = T.Resize((512), interpolation=T.InterpolationMode.BICUBIC)(umap_img)
+        umap_img = T.Resize((512,384), interpolation=T.InterpolationMode.BICUBIC)(umap_img)
         umap_img.save(os.path.join(save_dir, f"batch-{experiment}_time_{t}.png"))

@@ -15,6 +15,7 @@ s_l_VITON_repaint
 test
 PCA_features_vis
 feature_map
+feature_map_s_l
 dataset
 
 #### jho >>>>
