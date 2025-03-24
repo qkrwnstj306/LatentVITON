@@ -57,10 +57,12 @@ if __name__=='__main__':
                          '/home/qkrwnstj/StableVITON/ours/pair',
                          '/home/qkrwnstj/StableVITON/original/pair',
                          '/home/qkrwnstj/StableVITON/ours_latents/pair',
+                         '/home/qkrwnstj/StableVITON/s_l_VITON/pair',
+                         '/home/qkrwnstj/StableVITON/s_l_VITON_repaint/pair',
                          ]
     
     original_dir = '/home/qkrwnstj/StableVITON/dataset/zalando-hd-resized/test/image'
     
-    generated_dir = generated_dir_lst[0]
+    generated_dir = generated_dir_lst[5]
     
     cal_kid(original_dir, generated_dir)

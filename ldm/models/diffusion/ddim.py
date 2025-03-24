@@ -146,15 +146,16 @@ class DDIMSampler(object):
         print(f"Running DDIM Sampling with {total_steps} timesteps")
 
         iterator = tqdm(time_range, desc='DDIM Sampler', total=total_steps)
-
         for i, step in enumerate(iterator):
             index = total_steps - i - 1
             ts = torch.full((b,), step, device=device, dtype=torch.long)
 
-            if mask is not None:
+            if mask is not None and i != 0: # 처음에는 inference.py에서 교체해주니까 필요없다.
                 assert x0 is not None
-                img_orig = self.model.q_sample(x0, ts)  # TODO: deterministic forward pass?
+                img_orig = self.model.q_sample(x0, ts) 
                 img = img_orig * mask + (1. - mask) * img
+
+            if img_callback: img_callback(img, i)
 
             if ucg_schedule is not None:
                 assert len(ucg_schedule) == len(time_range)
@@ -169,7 +170,6 @@ class DDIMSampler(object):
                                       dynamic_threshold=dynamic_threshold)
             img, pred_x0, cond_output_dict = outs
             if callback: callback(i)
-            if img_callback: img_callback(pred_x0, i)
 
             if index % log_every_t == 0 or index == total_steps - 1:
                 intermediates['x_inter'].append(img)

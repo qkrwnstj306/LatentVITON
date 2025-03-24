@@ -76,9 +76,11 @@ if __name__ == "__main__":
                          '/home/qkrwnstj/StableVITON/ours/pair',
                          '/home/qkrwnstj/StableVITON/original/pair',
                          '/home/qkrwnstj/StableVITON/ours_latents/pair',
+                         '/home/qkrwnstj/StableVITON/s_l_VITON/pair',
+                         '/home/qkrwnstj/StableVITON/s_l_VITON_repaint/pair',
                          ]
     
-    generated_dir = generated_dir_lst[3]
+    generated_dir = generated_dir_lst[5]
     
     generated_img_extension = '.jpg'
     

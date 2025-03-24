@@ -32,6 +32,7 @@ def build_args():
     parser.add_argument("--eta", type=float, default=0.0)
     
     parser.add_argument("--seed", type=int, default=23)
+    parser.add_argument("--img_callback", action="store_true")
     args = parser.parse_args()
     return args
 
@@ -103,16 +104,33 @@ def main(args):
         # size = (bs, C, H, W)
         # start_code = torch.randn(size, device=z.device)
         
-        '''Alleviate SNR for x_T using only agnostic_mask'''
-        C, H, W = shape
-        size = (bs, C, H, W)
-        start_code = torch.randn(size, device=z.device)
-        alleviated_start_code = model.q_sample(z, ts) 
+        # '''Alleviate SNR for x_T using only agnostic_mask'''
+        # C, H, W = shape
+        # size = (bs, C, H, W)
+        # start_code = torch.randn(size, device=z.device)
+        # alleviated_start_code = model.q_sample(z, ts) 
+        # agnostic_mask_inversion = torch.cat([c["first_stage_cond"]], dim=1)[:, 4, ...].unsqueeze(1) # agnostic_mask_inversion: [BS, 1, 64, 48], unmasked region set to 1
+        # start_code = start_code * (1. - agnostic_mask_inversion) + alleviated_start_code * agnostic_mask_inversion
+        # mask = agnostic_mask_inversion
+
+        '''StableVITON + Ours'''
+        start_code = model.q_sample(z, ts) 
         agnostic_mask_inversion = torch.cat([c["first_stage_cond"]], dim=1)[:, 4, ...].unsqueeze(1) # agnostic_mask_inversion: [BS, 1, 64, 48], unmasked region set to 1
-        start_code = start_code * (1. - agnostic_mask_inversion) + alleviated_start_code * agnostic_mask_inversion
         mask = agnostic_mask_inversion
         
-        
+        img_callback_fn = None
+        if args.img_callback:
+            def save_feature_map(feature_map, filename):
+                save_feature_dir = './feature_map'
+                os.makedirs(save_feature_dir, exist_ok=True)
+                save_path = os.path.join(save_feature_dir, f"{filename}.pt")
+                torch.save(feature_map, save_path)
+            def img_callback(img, time_step):
+                for sample_idx, (sample, fn,  cloth_fn) in enumerate(zip(img, batch['img_fn'], batch["cloth_fn"])):
+                    save_feature_map(sample, f"{fn.split('.')[0]}_{cloth_fn.split('.')[0]}_{time_step}")
+            img_callback_fn = img_callback
+
+
         samples, _, _ = sampler.sample(
             args.denoise_steps,
             bs,
@@ -123,8 +141,12 @@ def main(args):
             eta=args.eta,
             unconditional_conditioning=uc_full,
             mask=mask,
-            x0=z
+            x0=z,
+            img_callback=img_callback_fn,
         )
+
+        if args.img_callback:
+            continue
 
         x_samples = model.decode_first_stage(samples)
         for sample_idx, (x_sample, fn,  cloth_fn) in enumerate(zip(x_samples, batch['img_fn'], batch["cloth_fn"])):

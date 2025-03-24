@@ -10,6 +10,11 @@ ours_latents
 original
 results
 stableVITON
+s_l_VITON
+s_l_VITON_repaint
+test
+PCA_features_vis
+feature_map
 dataset
 
 #### jho >>>>

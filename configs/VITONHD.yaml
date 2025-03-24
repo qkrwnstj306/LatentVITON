@@ -92,7 +92,8 @@ model:
       scale: 1.0
 
     cond_stage_config:
-      target: ldm.modules.image_encoders.modules.DINOv2ImageEmbedder
+      target: ldm.modules.image_encoders.modules.FrozenCLIPImageEmbedder
+      # target: ldm.modules.image_encoders.modules.DINOv2ImageEmbedder
 dataset_name: VITONHDDataset
 resume_path: ./ckpts/VITONHD_PBE_pose.ckpt
 default_prompt: ""

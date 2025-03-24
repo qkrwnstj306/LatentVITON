@@ -23,3 +23,19 @@ ssim_eval / _for_GPVTON
 
 - For inference, 
 python src/inference.py --dataset vitonhd --vitonhd_dataroot ~/comparison/HR-VITON/data/zalando-hd-resized/ --output_dir ~/comparison/ladi-vton/results --test_order unpaired --mixed_precision fp16 --enable_xformers_memory_efficient_attention --use_png --compute_metrics
+
+* HR-VITON
+
+- For infernece: ./Output에 결과 이미지가 있다.
+python3 test_generator.py \
+ --occlusion \
+ --cuda True \
+ --test_name results \
+ --tocg_checkpoint ./ckpts/mtviton.pth \
+ --gpu_ids 0 \
+ --gen_checkpoint ./ckpts/gen.pth \
+ --datasetting {unpaired/paired} \
+ --dataroot ../../StableVITON/dataset/zalando-hd-resized \
+ --data_list test_pairs.txt \
+ --output_dir ./results/{unpair/pair} \
+ --batch-size 8
