@@ -51,7 +51,8 @@ def build_args():
     parser.add_argument("--imageclip_trainable", action="store_false")
     parser.add_argument("--no_strict_load", action="store_true")    
     parser.add_argument("--seed", type=int, default=23)    
-    
+    parser.add_argument("--resume_from_checkpoint", type=str, default="")
+
     args = parser.parse_args()
     
     args.config_path = opj("./configs", f"{args.config_name}.yaml")
@@ -205,6 +206,7 @@ def main_worker(args):
     trainer = pl.Trainer(
         precision=args.precision, 
         callbacks=[img_logger, cp_callback], 
+        resume_from_checkpoint=args.resume_from_checkpoint,
         logger=tb_logger, 
         devices=args.devices,
         accelerator="gpu", 

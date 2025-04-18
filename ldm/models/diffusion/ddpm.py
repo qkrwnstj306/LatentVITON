@@ -369,7 +369,11 @@ class DDPM(pl.LightningModule):
         noise = default(noise, lambda: torch.randn_like(x_start))
         return (extract_into_tensor(self.sqrt_alphas_cumprod, t, x_start.shape) * x_start +
                 extract_into_tensor(self.sqrt_one_minus_alphas_cumprod, t, x_start.shape) * noise)
-
+        
+    def q_sample_x(self, x_start, t, noise=None):
+        noise = default(noise, lambda: torch.randn_like(x_start))
+        return extract_into_tensor(self.sqrt_alphas_cumprod, t, x_start.shape) * x_start
+    
     def get_v(self, x, noise, t):
         return (
                 extract_into_tensor(self.sqrt_alphas_cumprod, t, x.shape) * noise -
@@ -887,9 +891,11 @@ class LatentDiffusion(DDPM):
                 z = torch.argmax(z.exp(), dim=1).long()
             z = self.first_stage_model.quantize.get_codebook_entry(z, shape=None)
             z = rearrange(z, 'b h w c -> b c h w').contiguous()
-
-        z = 1. / self.scale_factor * z
-        return self.first_stage_model.decode(z)
+        output = self.first_stage_model.decode(z)
+        if not isinstance(output, DecoderOutput):
+            return output
+        else:
+            return output.sample
 
     @torch.no_grad()
     def encode_first_stage(self, x):

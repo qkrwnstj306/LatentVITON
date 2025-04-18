@@ -47,15 +47,41 @@ def make_beta_schedule(schedule, n_timestep, linear_start=1e-4, linear_end=2e-2,
 def make_ddim_timesteps(ddim_discr_method, num_ddim_timesteps, num_ddpm_timesteps, verbose=True):
     if ddim_discr_method == 'uniform':
         c = num_ddpm_timesteps // num_ddim_timesteps
-        ddim_timesteps = np.asarray(list(range(0, num_ddpm_timesteps, c)))
+        """기존에는 T를 포함하지 않으면서 1 ~ 981"""
+        # ddim_timesteps = np.asarray(list(range(0, num_ddpm_timesteps, c)))
+        # steps_out = ddim_timesteps + 1
+
+        """T를 포함하면서 0까지 간다: 0 ~ 999"""
+        ddim_timesteps = np.linspace(0, num_ddpm_timesteps - 1, num_ddim_timesteps).astype(int)
+        #ddim_timesteps[:-1] += 1
+        steps_out = ddim_timesteps
+    elif ddim_discr_method == 'logarithmic':
+        """0과 999를 포함하면서 초기 denoising에 집중"""
+        # array([  0, 300, 476, 601, 698, 777, 843, 902, 953, 999])
+        ddim_timesteps = (num_ddpm_timesteps * (np.log1p(np.arange(num_ddim_timesteps)) / np.log1p(num_ddim_timesteps))).astype(int)
+        # 999을 포함하도록 배열을 조정
+        if 999 not in ddim_timesteps:
+            # 최대값을 999로 설정
+            max_value = max(ddim_timesteps)
+            ddim_timesteps = (ddim_timesteps / max_value * 999).astype(int)
+
+        # 999이 마지막 값으로 포함되도록 보장
+        ddim_timesteps[-1] = 999
+        steps_out = ddim_timesteps
     elif ddim_discr_method == 'quad':
         ddim_timesteps = ((np.linspace(0, np.sqrt(num_ddpm_timesteps * .8), num_ddim_timesteps)) ** 2).astype(int)
+    elif ddim_discr_method == "trailing":
+        """999를 포함하면서 초기 denoising에 집중"""
+        # array([ 99, 199, 299, 399, 499, 599, 699, 799, 899, 999])
+        ddim_timesteps = np.flip(np.arange(num_ddpm_timesteps, 0, - num_ddpm_timesteps / num_ddim_timesteps)).astype(int)
+        ddim_timesteps -= 1
+        steps_out = ddim_timesteps
     else:
         raise NotImplementedError(f'There is no ddim discretization method called "{ddim_discr_method}"')
 
     # assert ddim_timesteps.shape[0] == num_ddim_timesteps
     # add one to get the final alpha values right (the ones from first scale to data during sampling)
-    steps_out = ddim_timesteps + 1
+
     if verbose:
         print(f'Selected timesteps for ddim sampler: {steps_out}')
     return steps_out

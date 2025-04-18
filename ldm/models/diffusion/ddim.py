@@ -3,6 +3,7 @@
 import torch
 import numpy as np
 from tqdm import tqdm
+from torch.autograd import grad
 
 from ldm.modules.diffusionmodules.util import make_ddim_sampling_parameters, make_ddim_timesteps, noise_like, extract_into_tensor
 
@@ -50,7 +51,7 @@ class DDIMSampler(object):
             (1 - self.alphas_cumprod_prev) / (1 - self.alphas_cumprod) * (
                         1 - self.alphas_cumprod / self.alphas_cumprod_prev))
         self.register_buffer('ddim_sigmas_for_original_num_steps', sigmas_for_original_sampling_steps)
-
+    
     @torch.no_grad()
     def sample(self,
                S,
@@ -75,6 +76,14 @@ class DDIMSampler(object):
                unconditional_conditioning=None, # this has to come in the same format as the conditioning, # e.g. as encoded tokens, ...
                dynamic_threshold=None,
                ucg_schedule=None,
+               predicted_x0=None,
+               sampling_schedule="uniform",
+               mcg=False,
+               dps=False,
+               pixel_mcg=False,
+               pixel_mask=None,
+               pixel_x0=None,
+               noisy_mcg=False,
                **kwargs
                ):
         if conditioning is not None:
@@ -94,7 +103,7 @@ class DDIMSampler(object):
                 if conditioning.shape[0] != batch_size:
                     print(f"Warning: Got {conditioning.shape[0]} conditionings but batch-size is {batch_size}")
 
-        self.make_schedule(ddim_num_steps=S, ddim_eta=eta, verbose=verbose)
+        self.make_schedule(ddim_num_steps=S, ddim_discretize=sampling_schedule, ddim_eta=eta, verbose=verbose)
         # sampling
         C, H, W = shape
         size = (batch_size, C, H, W)
@@ -115,7 +124,14 @@ class DDIMSampler(object):
                                                     unconditional_guidance_scale=unconditional_guidance_scale,
                                                     unconditional_conditioning=unconditional_conditioning,
                                                     dynamic_threshold=dynamic_threshold,
-                                                    ucg_schedule=ucg_schedule
+                                                    ucg_schedule=ucg_schedule,
+                                                    predicted_x0=predicted_x0,
+                                                    mcg=mcg,
+                                                    dps=dps,
+                                                    pixel_mcg=pixel_mcg,
+                                                    pixel_mask=pixel_mask,
+                                                    pixel_x0=pixel_x0,
+                                                    noisy_mcg=noisy_mcg,
                                                     )
         return samples, intermediates, cond_output_dict
 
@@ -126,7 +142,8 @@ class DDIMSampler(object):
                       mask=None, x0=None, img_callback=None, log_every_t=100,
                       temperature=1., noise_dropout=0., score_corrector=None, corrector_kwargs=None,
                       unconditional_guidance_scale=1., unconditional_conditioning=None, dynamic_threshold=None,
-                      ucg_schedule=None):
+                      ucg_schedule=None, predicted_x0=None, 
+                      mcg=False, dps=False, pixel_mcg=False, pixel_mask=None, pixel_x0=None, noisy_mcg=False):
         device = self.model.betas.device
         b = shape[0]
         if x_T is None:
@@ -145,15 +162,78 @@ class DDIMSampler(object):
         total_steps = timesteps if ddim_use_original_steps else timesteps.shape[0]
         print(f"Running DDIM Sampling with {total_steps} timesteps")
 
+        """Reset Method"""
+        # reset_done = False
+        # if reset_done:
+        #     print(f"Running Reset Process Before DDIM Sampling!!!")
+        #     index = total_steps - 1
+        #     step = time_range[0] # 999 or 981
+        #     ts = torch.full((b,), step, device=device, dtype=torch.long)
+        #     # mcg가 False일 때만 torch.no_grad() 사용
+        #     with torch.no_grad() if not mcg else torch.enable_grad():
+        #         if mcg:
+        #             assert img.size(0) == 1
+        #             img = img.requires_grad_()
+  
+        #         outs = self.p_sample_ddim(img, cond, ts, index=index, use_original_steps=ddim_use_original_steps,
+        #                                 quantize_denoised=quantize_denoised, temperature=temperature,
+        #                                 noise_dropout=noise_dropout, score_corrector=score_corrector,
+        #                                 corrector_kwargs=corrector_kwargs,
+        #                                 unconditional_guidance_scale=unconditional_guidance_scale,
+        #                                 unconditional_conditioning=unconditional_conditioning,
+        #                                 dynamic_threshold=dynamic_threshold)
+        #         sample, pred_x0, cond_output_dict = outs
+  
+        #         if mcg:
+        #             norm = torch.norm((x0 * mask) - (pred_x0 * mask))
+        #             norm_grad = grad(outputs=norm, inputs=img)[0]
+        #             img = sample - norm_grad
+        #         else:
+        #             img = sample
+     
+        #     if mask is not None and dps == False: # 처음에는 inference.py에서 교체해주니까 필요없다.
+        #         assert x0 is not None
+        #         img_orig = self.model.q_sample(x0, ts) 
+        #         img = img_orig * mask + (1. - mask) * img
+            
+        #     img.detach_()
+ 
+        #     index = total_steps - 2
+        #     next_index = index + 1
+        #     step = time_range[1]
+        #     ts = torch.full((b,), step, device=device, dtype=torch.long)
+            
+        #     with torch.no_grad():
+                
+        #         outs = self.p_sample_ddim(img, cond, ts, index=index, use_original_steps=ddim_use_original_steps,
+        #                                 quantize_denoised=quantize_denoised, temperature=temperature,
+        #                                 noise_dropout=noise_dropout, score_corrector=score_corrector,
+        #                                 corrector_kwargs=corrector_kwargs,
+        #                                 unconditional_guidance_scale=unconditional_guidance_scale,
+        #                                 unconditional_conditioning=unconditional_conditioning,
+        #                                 dynamic_threshold=dynamic_threshold, reset=reset_done)
+        #         sample, pred_x0, cond_output_dict, eps = outs
+                
+        #         alphas = self.model.alphas_cumprod if ddim_use_original_steps else self.ddim_alphas
+ 
+        #         # select parameters corresponding to the currently considered timestep
+        #         a_t = torch.full((b, 1, 1, 1), alphas[index], device=device)
+        #         a_t_next = torch.full((b, 1, 1, 1), alphas[next_index], device=device)
+            
+        #         img = (img - (1 - a_t).sqrt() * eps) * (a_t_next.sqrt() / a_t.sqrt()) + (1 - a_t_next).sqrt() * eps
+ 
+        #     if mask is not None and dps == False: # 처음에는 inference.py에서 교체해주니까 필요없다.
+        #         assert x0 is not None
+        #         step = time_range[0]
+        #         ts = torch.full((b,), step, device=device, dtype=torch.long)
+        #         img_orig = self.model.q_sample(x0, ts) 
+        #         img = img_orig * mask + (1. - mask) * img
+            
         iterator = tqdm(time_range, desc='DDIM Sampler', total=total_steps)
+
         for i, step in enumerate(iterator):
             index = total_steps - i - 1
             ts = torch.full((b,), step, device=device, dtype=torch.long)
-
-            if mask is not None and i != 0: # 처음에는 inference.py에서 교체해주니까 필요없다.
-                assert x0 is not None
-                img_orig = self.model.q_sample(x0, ts) 
-                img = img_orig * mask + (1. - mask) * img
 
             if img_callback: img_callback(img, i)
 
@@ -161,16 +241,62 @@ class DDIMSampler(object):
                 assert len(ucg_schedule) == len(time_range)
                 unconditional_guidance_scale = ucg_schedule[i]
 
-            outs = self.p_sample_ddim(img, cond, ts, index=index, use_original_steps=ddim_use_original_steps,
-                                      quantize_denoised=quantize_denoised, temperature=temperature,
-                                      noise_dropout=noise_dropout, score_corrector=score_corrector,
-                                      corrector_kwargs=corrector_kwargs,
-                                      unconditional_guidance_scale=unconditional_guidance_scale,
-                                      unconditional_conditioning=unconditional_conditioning,
-                                      dynamic_threshold=dynamic_threshold)
-            img, pred_x0, cond_output_dict = outs
-            if callback: callback(i)
+            # mcg가 False일 때만 torch.no_grad() 사용
+            # with torch.no_grad() if not (mcg or pixel_mcg or noisy_mcg) else torch.enable_grad():
+            #     if mcg or pixel_mcg or noisy_mcg:
+            #         assert img.size(0) == 1
+            #         img = img.requires_grad_()
+            with torch.no_grad():
+                
+                outs = self.p_sample_ddim(img, cond, ts, index=index, use_original_steps=ddim_use_original_steps,
+                                        quantize_denoised=quantize_denoised, temperature=temperature,
+                                        noise_dropout=noise_dropout, score_corrector=score_corrector,
+                                        corrector_kwargs=corrector_kwargs,
+                                        unconditional_guidance_scale=unconditional_guidance_scale,
+                                        unconditional_conditioning=unconditional_conditioning,
+                                        dynamic_threshold=dynamic_threshold,
+                                        mcg=mcg, x0=x0, mask=mask)
+                sample, pred_x0, cond_output_dict = outs
 
+                
+                # if mcg:
+                #     norm = torch.norm((x0 * mask) - (pred_x0 * mask))
+                #     norm_grad = grad(outputs=norm, inputs=img)[0]
+                #     img = sample - norm_grad
+                # elif pixel_mcg:
+                #     pixel_pred_x0 = self.model.decode_first_stage_train(pred_x0)
+                #     norm = torch.log1p(torch.norm((pixel_x0 * pixel_mask) - (pixel_pred_x0 * pixel_mask)))
+                #     norm_grad = grad(outputs=norm, inputs=img)[0]
+                #     img = sample - norm_grad
+                # elif noisy_mcg:
+                #     if len(time_range) - 1 != i:
+                #         prev_ts = torch.full((b,), time_range[i+1], device=device, dtype=torch.long)
+                #         img_orig = self.model.q_sample(x0, prev_ts)
+                #     else:
+                #         img_orig = x0
+                #     norm = torch.norm((img_orig * mask) - (sample * mask))
+                #     norm_grad = grad(outputs=norm, inputs=img)[0]
+                #     img = sample - norm_grad
+                # else:
+                #     img = sample
+
+                img = sample
+            if mask is not None and dps == False: # 처음에는 inference.py에서 교체해주니까 필요없다.
+                assert x0 is not None
+                if not noisy_mcg:
+                    if len(time_range) - 1 != i:
+                        prev_ts = torch.full((b,), time_range[i+1], device=device, dtype=torch.long)
+                        img_orig = self.model.q_sample(x0, prev_ts)
+                    else:
+                        img_orig = x0
+                img = img_orig * mask + (1. - mask) * img
+                #img = (img_orig * 0.5 + img * 0.5) * mask + (1. - mask) * img
+            
+            #img.detach_()
+            
+            if callback: callback(i)
+            if predicted_x0 and step == 999: predicted_x0(pred_x0)
+            
             if index % log_every_t == 0 or index == total_steps - 1:
                 intermediates['x_inter'].append(img)
                 intermediates['pred_x0'].append(pred_x0)
@@ -203,63 +329,14 @@ class DDIMSampler(object):
                 cond_output_dict[f"cond_sample"] = cond_output
         return img, intermediates, cond_output_dict
 
-    @torch.no_grad()
+    # @torch.no_grad()
     def p_sample_ddim(self, x, c, t, index, repeat_noise=False, use_original_steps=False, quantize_denoised=False,
                       temperature=1., noise_dropout=0., score_corrector=None, corrector_kwargs=None,
                       unconditional_guidance_scale=1., unconditional_conditioning=None,
-                      dynamic_threshold=None):
+                      dynamic_threshold=None, reset=False,
+                      mcg=False, x0=None, mask=None):
         b, *_, device = *x.shape, x.device
-        if unconditional_conditioning is None or unconditional_guidance_scale == 1.:
-            model_output, cond_output_dict = self.model.apply_model(x, t, c)
-        else:
-            # x_in = torch.cat([x] * 2)
-            # t_in = torch.cat([t] * 2)
-            # if isinstance(c, dict):
-            #     assert isinstance(unconditional_conditioning, dict)
-            #     c_in = dict()
-            #     for k in c:
-            #         if isinstance(c[k], list):
-            #             c_in[k] = [torch.cat([
-            #                 unconditional_conditioning[k][i],
-            #                 c[k][i]]) for i in range(len(c[k]))]
-            #         else:
-            #             c_in[k] = torch.cat([
-            #                     unconditional_conditioning[k],
-            #                     c[k]])
-            # elif isinstance(c, list):
-            #     c_in = list()
-            #     assert isinstance(unconditional_conditioning, list)
-            #     for i in range(len(c)):
-            #         c_in.append(torch.cat([unconditional_conditioning[i], c[i]]))
-            # else:
-            #     c_in = torch.cat([unconditional_conditioning, c])
-            x_in = x
-            t_in = t
-            model_t, cond_output_dict_cond = self.model.apply_model(x_in, t_in, c)
-            model_uncond, cond_output_dict_uncond = self.model.apply_model(x_in, t_in, unconditional_conditioning)
-            if isinstance(model_t, tuple):
-                model_t, _ = model_t
-            if isinstance(model_uncond, tuple):
-                model_uncond, _ = model_uncond
-            if cond_output_dict_cond is not None:
-                cond_output_dict = dict()
-                for k in cond_output_dict_cond.keys():
-                    cond_output_dict[k] = torch.cat([cond_output_dict_uncond[k], cond_output_dict_cond[k]])
-            else:
-                cond_output_dict = None
-            # model_output, cond_output_dict = self.model.apply_model(x_in, t_in, c_in)
-            # model_uncond, model_t = model_output.chunk(2)
-            model_output = model_uncond + unconditional_guidance_scale * (model_t - model_uncond)
-
-        if self.model.parameterization == "v":
-            e_t = self.model.predict_eps_from_z_and_v(x, t, model_output)
-        else:
-            e_t = model_output
-
-        if score_corrector is not None:
-            assert self.model.parameterization == "eps", 'not implemented'
-            e_t = score_corrector.modify_score(self.model, e_t, x, t, c, **corrector_kwargs)
-
+        
         alphas = self.model.alphas_cumprod if use_original_steps else self.ddim_alphas
         alphas_prev = self.model.alphas_cumprod_prev if use_original_steps else self.ddim_alphas_prev
         sqrt_one_minus_alphas = self.model.sqrt_one_minus_alphas_cumprod if use_original_steps else self.ddim_sqrt_one_minus_alphas
@@ -269,6 +346,54 @@ class DDIMSampler(object):
         a_prev = torch.full((b, 1, 1, 1), alphas_prev[index], device=device)
         sigma_t = torch.full((b, 1, 1, 1), sigmas[index], device=device)
         sqrt_one_minus_at = torch.full((b, 1, 1, 1), sqrt_one_minus_alphas[index],device=device)
+        
+        if unconditional_conditioning is None or unconditional_guidance_scale == 1.:
+            model_output, cond_output_dict = self.model.apply_model(x, t, c)
+        else:
+            with torch.no_grad() if not mcg else torch.enable_grad():
+                if mcg:
+                    x = x.requires_grad_()
+                x_in = x
+                t_in = t
+                model_t, cond_output_dict_cond = self.model.apply_model(x_in, t_in, c)
+                # with torch.no_grad():
+                model_uncond, cond_output_dict_uncond = self.model.apply_model(x_in, t_in, unconditional_conditioning)
+                
+                if isinstance(model_t, tuple):
+                    model_t, _ = model_t
+                if isinstance(model_uncond, tuple):
+                    model_uncond, _ = model_uncond
+                if cond_output_dict_cond is not None:
+                    cond_output_dict = dict()
+                    for k in cond_output_dict_cond.keys():
+                        cond_output_dict[k] = torch.cat([cond_output_dict_uncond[k], cond_output_dict_cond[k]])
+                else:
+                    cond_output_dict = None
+                
+                #mcg_scale = 1.0
+                mcg_scale = (1 - np.cos(np.pi * (49 - index) / 50)) / 2
+                if mcg:
+                    model_cfg = model_uncond + unconditional_guidance_scale * (model_t - model_uncond)
+                    pred_x0 = (x - sqrt_one_minus_at * model_cfg) / a_t.sqrt()
+                    norm = torch.norm((x0 * mask) - (pred_x0 * mask))
+                    norm_grad = grad(outputs=norm, inputs=x_in)[0]
+                    model_output = model_uncond + unconditional_guidance_scale * (model_t - model_uncond) - mcg_scale * norm_grad
+                else:
+                    model_output = model_uncond + unconditional_guidance_scale * (model_t - model_uncond)
+                   
+                #model_output = model_uncond + unconditional_guidance_scale * (model_t - model_uncond) - norm_grad
+        model_output.detach_()
+        x.detach_()
+        
+        
+        if self.model.parameterization == "v":
+            e_t = self.model.predict_eps_from_z_and_v(x, t, model_output)
+        else:
+            e_t = model_output
+
+        if score_corrector is not None:
+            assert self.model.parameterization == "eps", 'not implemented'
+            e_t = score_corrector.modify_score(self.model, e_t, x, t, c, **corrector_kwargs)
 
         # current prediction for x_0
         if self.model.parameterization != "v":
@@ -288,7 +413,10 @@ class DDIMSampler(object):
         if noise_dropout > 0.:
             noise = torch.nn.functional.dropout(noise, p=noise_dropout)
         x_prev = a_prev.sqrt() * pred_x0 + dir_xt + noise
-
+        if reset:
+            return x_prev, pred_x0, cond_output_dict, e_t 
+        if index == 0:
+            return pred_x0, pred_x0, cond_output_dict 
         return x_prev, pred_x0, cond_output_dict
 
     @torch.no_grad()

@@ -55,14 +55,15 @@ def cal_kid(original_dir, generated_dir):
 if __name__=='__main__':
     generated_dir_lst = ['/home/qkrwnstj/StableVITON/stableVITON/pair', 
                          '/home/qkrwnstj/StableVITON/ours/pair',
-                         '/home/qkrwnstj/StableVITON/original/pair',
+                         '/home/qkrwnstj/StableVITON/results_981/original/pair',
                          '/home/qkrwnstj/StableVITON/ours_latents/pair',
                          '/home/qkrwnstj/StableVITON/s_l_VITON/pair',
                          '/home/qkrwnstj/StableVITON/s_l_VITON_repaint/pair',
+                         '/home/qkrwnstj/StableVITON/999_unmasked_dps/pair',
                          ]
     
     original_dir = '/home/qkrwnstj/StableVITON/dataset/zalando-hd-resized/test/image'
     
-    generated_dir = generated_dir_lst[5]
+    generated_dir = generated_dir_lst[6]
     
     cal_kid(original_dir, generated_dir)

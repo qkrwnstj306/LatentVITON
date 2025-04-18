@@ -6,11 +6,15 @@ import numpy as np
 from einops import rearrange
 
 def load_experiments_features(feature_maps_path, t):
+#     pth_files = [
+#     f for f in os.listdir(feature_maps_path) 
+#     if f.endswith(f"_{t}.pt")
+#      ]   
     pth_files = [
     f for f in os.listdir(feature_maps_path) 
-    if f.endswith(f"_{t}.pt")
-]   
-
+    if f.endswith(f".pt")
+    ]   
+    
     feature_maps = []
     file_names = []
     for i, pth_file in enumerate(pth_files):

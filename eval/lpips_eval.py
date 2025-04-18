@@ -57,8 +57,9 @@ def main():
                          '/home/qkrwnstj/StableVITON/ours_latents/pair',
                          '/home/qkrwnstj/StableVITON/s_l_VITON/pair',
                          '/home/qkrwnstj/StableVITON/s_l_VITON_repaint/pair',
+                         '/home/qkrwnstj/StableVITON/999_unmasked_replacement_cfg_3/pair',
                          ]
-    generated_dir = generated_dir_lst[5]
+    generated_dir = generated_dir_lst[6]
     generated_img_extension = '.jpg'
 
     dataset = CustomDataset(original_dir, generated_dir, generated_img_extension)

@@ -5,6 +5,7 @@ import numpy as np
 import torch.nn.functional as F
 
 import torch
+import matplotlib.pyplot as plt
 from sklearn.decomposition import PCA
 import os
 from PIL import Image
