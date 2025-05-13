@@ -1,69 +1,69 @@
 import torch
 from torchmetrics.image.kid import KernelInceptionDistance
-from torchvision import transforms
-from PIL import Image
+import cv2
+import albumentations as A
 import os
 
-def pil_to_tensor(img):
+def cv2_to_tensor(img):
     """
-    PIL 이미지를 torch.Tensor로 변환합니다.
+    OpenCV 이미지를 RGB로 변환하고 torch.Tensor로 변환합니다.
     """
-    img_tensor = transforms.functional.to_tensor(img)  # 이미지를 텐서로 변환
-    img_tensor = img_tensor.byte()  # dtype을 torch.uint8로 변경
+    img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+    img_tensor = torch.from_numpy(img_rgb).permute(2, 0, 1).float() / 255.0  # [H,W,C] -> [C,H,W]
     return img_tensor
 
 def cal_kid(original_dir, generated_dir):
-    kid = KernelInceptionDistance(subset_size=50, normalize=True) # if image range is in [0,1], set normalize=True
+    kid = KernelInceptionDistance(subset_size=50, normalize=True)  # 이미지 범위 [0, 1]일 경우 normalize=True
 
-    original_files = os.listdir(original_dir)
-    generated_files = os.listdir(generated_dir)
+    resize_transform = A.Resize(height=512, width=384)
 
-    original_batch = []  # 실제 이미지 미니 배치를 저장하기 위한 리스트
-    generated_batch = []  # 생성된 이미지 미니 배치를 저장하기 위한 리스트
+    original_batch = []
+    generated_batch = []
+
+    original_files = sorted([f for f in os.listdir(original_dir) if f.lower().endswith(('.jpg', '.png'))])
+    generated_files = sorted([f for f in os.listdir(generated_dir) if f.lower().endswith(('.jpg', '.png'))])
 
     for file in original_files:
-        if file.endswith(".jpg") or file.endswith(".png"):  # 이미지 파일인 경우에만 처리
-            img_path = os.path.join(original_dir, file)
-            img = Image.open(img_path)
-            img = img.resize((384, 512))  # 모델 입력 크기에 맞게 조정
-            img_tensor = pil_to_tensor(img)  # 이미지를 torch.Tensor로 변환 -> range: [0,1]
-            original_batch.append(img_tensor)
-            if len(original_batch) == 50:  # 미니 배치 크기에 도달하면
-                # 미니 배치로 업데이트
-                original_batch_tensor = torch.stack(original_batch)
-                kid.update(original_batch_tensor, real=True)
-                # 미니 배치 초기화
-                original_batch = []
+        img_path = os.path.join(original_dir, file)
+        img = cv2.imread(img_path)
+        if img is None:
+            print(f"이미지 불러오기 실패: {file}")
+            continue
+        img = resize_transform(image=img)["image"]
+        img_tensor = cv2_to_tensor(img)
+        original_batch.append(img_tensor)
+        if len(original_batch) == 50:
+            kid.update(torch.stack(original_batch), real=True)
+            original_batch = []
 
     for file in generated_files:
-        if file.endswith(".jpg") or file.endswith(".png"):  # 이미지 파일인 경우에만 처리
-            img_path = os.path.join(generated_dir, file)
-            img = Image.open(img_path)
-            img = img.resize((384, 512))  # 모델 입력 크기에 맞게 조정
-            img_tensor = pil_to_tensor(img)  # 이미지를 torch.Tensor로 변환 -> range: [0,1]
-            generated_batch.append(img_tensor)
-            if len(generated_batch) == 50:  # 미니 배치 크기에 도달하면
-                # 미니 배치로 업데이트
-                generated_batch_tensor = torch.stack(generated_batch)
-                kid.update(generated_batch_tensor, real=False)
-                # 미니 배치 초기화
-                generated_batch = []
+        img_path = os.path.join(generated_dir, file)
+        img = cv2.imread(img_path)
+        if img is None:
+            print(f"이미지 불러오기 실패: {file}")
+            continue
+        img = resize_transform(image=img)["image"]
+        img_tensor = cv2_to_tensor(img)
+        generated_batch.append(img_tensor)
+        if len(generated_batch) == 50:
+            kid.update(torch.stack(generated_batch), real=False)
+            generated_batch = []
 
-    kid_mean, kid_std = kid.compute() 
+    kid_mean, kid_std = kid.compute()
     print(kid_mean, kid_std)
 
-if __name__=='__main__':
-    generated_dir_lst = ['/home/qkrwnstj/StableVITON/stableVITON/pair', 
-                         '/home/qkrwnstj/StableVITON/ours/pair',
-                         '/home/qkrwnstj/StableVITON/results_981/original/pair',
-                         '/home/qkrwnstj/StableVITON/ours_latents/pair',
-                         '/home/qkrwnstj/StableVITON/s_l_VITON/pair',
-                         '/home/qkrwnstj/StableVITON/s_l_VITON_repaint/pair',
-                         '/home/qkrwnstj/StableVITON/999_unmasked_dps/pair',
-                         ]
-    
+if __name__ == '__main__':
+    generated_dir_lst = [
+        '/home/qkrwnstj/StableVITON/stableVITON/pair',
+        '/home/qkrwnstj/StableVITON/ours/pair',
+        '/home/qkrwnstj/StableVITON/results_981/original/pair',
+        '/home/qkrwnstj/StableVITON/ours_latents/pair',
+        '/home/qkrwnstj/StableVITON/s_l_VITON/pair',
+        '/home/qkrwnstj/StableVITON/s_l_VITON_repaint/pair',
+        '/home/qkrwnstj/StableVITON/999_unmasked_lm_interpol_cfg_1/pair',
+    ]
+
     original_dir = '/home/qkrwnstj/StableVITON/dataset/zalando-hd-resized/test/image'
-    
     generated_dir = generated_dir_lst[6]
-    
+
     cal_kid(original_dir, generated_dir)

@@ -1,9 +1,10 @@
 from pytorch_msssim import ssim, ms_ssim, SSIM, MS_SSIM
 import os
 import torch
-from PIL import Image
 from torch.utils.data import Dataset, DataLoader
-import torchvision.transforms as transforms
+
+import albumentations as A
+import cv2
 
 class CustomDataset(Dataset):
     def __init__(self, original_dir, generated_dir, generated_img_extension: str):
@@ -15,9 +16,8 @@ class CustomDataset(Dataset):
 
         self.generated_img_extension = generated_img_extension
         
-        self.transform = transforms.Compose([
-            transforms.Resize((512,384), Image.BICUBIC),
-            transforms.ToTensor(),
+        self.transform = A.Compose([
+            A.Resize(height=512, width=384),
         ])
 
     def __len__(self):
@@ -29,14 +29,22 @@ class CustomDataset(Dataset):
         img_path = os.path.join(self.original_dir, img_name)
         
         img_name_without_extension = img_name.replace(".jpg", "")
-        generated_img_path = os.path.join(self.generated_dir,img_name_without_extension + "_" + img_name_without_extension + self.generated_img_extension)
+        generated_img_path = os.path.join(self.generated_dir, img_name_without_extension + "_" + img_name_without_extension + self.generated_img_extension)
         
-        original_img = Image.open(img_path).convert('RGB')
-        generated_img = Image.open(generated_img_path).convert('RGB')
+        original_img = cv2.imread(img_path)
+        generated_img = cv2.imread(generated_img_path)
+
+        original_img = cv2.cvtColor(original_img, cv2.COLOR_BGR2RGB)
+        generated_img = cv2.cvtColor(generated_img, cv2.COLOR_BGR2RGB)
         
-        original_img, generated_img = self.transform(original_img), self.transform(generated_img)
+        original_img = self.transform(image=original_img)['image']
+        generated_img = self.transform(image=generated_img)['image']
         
-        return {'original_img':original_img, 'generated_img':generated_img}
+        original_img = torch.from_numpy(original_img).permute(2, 0, 1).float()
+        generated_img = torch.from_numpy(generated_img).permute(2, 0, 1).float()
+        
+        return {'original_img': original_img, 'generated_img': generated_img}
+
 
 def collate_fn(samples):
     
@@ -59,7 +67,6 @@ def main(original_dir, generated_dir, generated_img_extension):
     ssim_score = 0
     for idx, batch in enumerate(dataloader):
         original_img, generated_img = batch['original_img'].to(device), batch['generated_img'].to(device)
-        original_img, generated_img = original_img * 255. , generated_img * 255.
         # X: (N,3,H,W) a batch of non-negative RGB images (0~255)
         # Y: (N,3,H,W)  
 
@@ -78,7 +85,7 @@ if __name__ == "__main__":
                          '/home/qkrwnstj/StableVITON/ours_latents/pair',
                          '/home/qkrwnstj/StableVITON/s_l_VITON/pair',
                          '/home/qkrwnstj/StableVITON/s_l_VITON_repaint/pair',
-                         '/home/qkrwnstj/StableVITON/999_unmasked_replacement_cfg_3/pair',
+                         '/home/qkrwnstj/StableVITON/999_unmasked_lm_1e5_wo_dc_cfg_1/pair',
                          ]
     
     generated_dir = generated_dir_lst[6]
@@ -86,4 +93,4 @@ if __name__ == "__main__":
     generated_img_extension = '.jpg'
     
     SSIM_score = main(original_dir, generated_dir, generated_img_extension)
-    print(f"SSIM_score: {SSIM_score}")
+    print(f"SSIM_score: {SSIM_score:.4f}")

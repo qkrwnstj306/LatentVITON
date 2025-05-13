@@ -1,9 +1,10 @@
+import albumentations as A
+import cv2
+import numpy as np
 import lpips
 import os
 import torch
-from PIL import Image
 from torch.utils.data import Dataset, DataLoader
-import torchvision.transforms as transforms
 
 class CustomDataset(Dataset):
     def __init__(self, original_dir, generated_dir, generated_img_extension: str):
@@ -14,11 +15,10 @@ class CustomDataset(Dataset):
         self.generated_images = os.listdir(self.generated_dir)
 
         self.generated_img_extension = generated_img_extension
-        
-        self.transform = transforms.Compose([
-            transforms.Resize((512,384), Image.BICUBIC),
-            transforms.ToTensor(),
-            transforms.Normalize((0.5,0.5,0.5), (0.5,0.5,0.5))
+
+        # albumentations transform 정의 (예: H=512, W=384)
+        self.transform = A.Compose([
+            A.Resize(height=512, width=384),
         ])
 
     def __len__(self):
@@ -30,14 +30,27 @@ class CustomDataset(Dataset):
         img_path = os.path.join(self.original_dir, img_name)
         
         img_name_without_extension = img_name.replace(".jpg", "")
-        generated_img_path = os.path.join(self.generated_dir,img_name_without_extension + "_" + img_name_without_extension + self.generated_img_extension)
+        generated_img_path = os.path.join(self.generated_dir, img_name_without_extension + "_" + img_name_without_extension + self.generated_img_extension)
 
-        original_img = Image.open(img_path).convert('RGB')
-        generated_img = Image.open(generated_img_path).convert('RGB')
-        
-        original_img, generated_img = self.transform(original_img), self.transform(generated_img)
-        
-        return {'original_img':original_img, 'generated_img':generated_img}
+        # OpenCV로 이미지 읽기 (RGB로 변환)
+        original_img = cv2.imread(img_path)
+        generated_img = cv2.imread(generated_img_path)
+
+        original_img = cv2.cvtColor(original_img, cv2.COLOR_BGR2RGB)
+        generated_img = cv2.cvtColor(generated_img, cv2.COLOR_BGR2RGB)
+
+        # albumentations transform 적용
+        original_img = self.transform(image=original_img)['image']
+        generated_img = self.transform(image=generated_img)['image']
+
+        # [H, W, C] → [C, H, W], 0~255 → -1~1 정규화
+        original_img = torch.from_numpy(original_img).permute(2, 0, 1).float() / 255.0
+        generated_img = torch.from_numpy(generated_img).permute(2, 0, 1).float() / 255.0
+        original_img = (original_img - 0.5) / 0.5
+        generated_img = (generated_img - 0.5) / 0.5
+
+        return {'original_img': original_img, 'generated_img': generated_img}
+
 
 def collate_fn(samples):
     
@@ -57,7 +70,7 @@ def main():
                          '/home/qkrwnstj/StableVITON/ours_latents/pair',
                          '/home/qkrwnstj/StableVITON/s_l_VITON/pair',
                          '/home/qkrwnstj/StableVITON/s_l_VITON_repaint/pair',
-                         '/home/qkrwnstj/StableVITON/999_unmasked_replacement_cfg_3/pair',
+                         '/home/qkrwnstj/StableVITON/999_unmasked_lm_1e5_wo_dc_cfg_1/pair',
                          ]
     generated_dir = generated_dir_lst[6]
     generated_img_extension = '.jpg'
@@ -78,4 +91,4 @@ def main():
     
 if __name__ == "__main__":
     LPIPS_score = main()
-    print(f"LPIPS_score: {LPIPS_score}")
+    print(f"LPIPS_score: {LPIPS_score.item():.4f}")

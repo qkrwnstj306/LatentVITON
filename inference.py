@@ -11,10 +11,12 @@ from torch.utils.data import DataLoader
 
 from cldm.plms_hacked import PLMSSampler
 from ldm.models.diffusion.ddim import DDIMSampler
+from ldm.models.diffusion.lmddim import LMDDIMSampler
 from cldm.model import create_model
 from utils import tensor2img
 
 from pytorch_lightning import seed_everything
+from latent_code import get_code
 
 def build_args():
     parser = argparse.ArgumentParser()
@@ -35,6 +37,10 @@ def build_args():
     parser.add_argument("--seed", type=int, default=23)
     parser.add_argument("--img_callback", action="store_true")
     parser.add_argument("--predicted_x0", action="store_true")
+    parser.add_argument("--code_name", type=str, default="pure")
+    parser.add_argument("--apply_re", action="store_true")
+
+
     parser.add_argument("--sampling_schedule", type=str, default="uniform")
     parser.add_argument("--mcg", action="store_true")
     parser.add_argument("--dps", action="store_true")
@@ -102,7 +108,7 @@ def main(args):
         sampler.model.batch = batch
 
         ts = torch.full((1,), 999, device=z.device, dtype=torch.long)
-        mask = None
+        start_code, mask = get_code(model, z, ts, c, batch, code_name=args.code_name, apply_re=args.apply_re)
         '''Alleviate SNR for x_T (StableVITON)'''
         # start_code = model.q_sample(z, ts) 
         # agnostic_mask_inversion = torch.cat([c["first_stage_cond"]], dim=1)[:, 4, ...].unsqueeze(1) # agnostic_mask_inversion: [BS, 1, 64, 48], unmasked region set to 1
@@ -123,6 +129,26 @@ def main(args):
         agnostic_mask_inversion = torch.cat([c["first_stage_cond"]], dim=1)[:, 4, ...].unsqueeze(1) # agnostic_mask_inversion: [BS, 1, 64, 48], unmasked region set to 1
         start_code = start_code * (1. - agnostic_mask_inversion) + alleviated_start_code * agnostic_mask_inversion
         mask = agnostic_mask_inversion
+
+        '''Combine Warped clothing information with Unmasked'''
+        # from einops import rearrange
+        # img = rearrange(batch['image'], 'b h w c -> b c h w')
+        # agn_mask_inversion = rearrange(batch['agn_mask'], 'b h w c -> b c h w') # raw image space
+        # wrp_cloth = rearrange(batch['wrp_cloth'], 'b h w c -> b c h w')
+        # wrp_cloth_mask = rearrange(batch['wrp_cloth_mask'], 'b h w c -> b c h w')
+        # start_code = wrp_cloth * wrp_cloth_mask * (1 - agn_mask_inversion) + img * agn_mask_inversion
+        
+        # # from torchvision.utils import make_grid, save_image
+        # # # 이미지 그리드 생성 (nrow=8은 한 줄에 8장씩)
+        # # grid = make_grid(start_code, nrow=8, normalize=True)
+        # # # 이미지 저장
+        # # save_image(grid, 'start_code_grid.png')
+
+        # start_code = model.get_first_stage_encoding(model.encode_first_stage(start_code))
+
+        # agnostic_mask_inversion = torch.cat([c["first_stage_cond"]], dim=1)[:, 4, ...].unsqueeze(1)  # [BS, 1, 64, 48]
+        # start_code = model.q_sample(start_code, ts) 
+        # mask = agnostic_mask_inversion
 
         '''offset noise'''
         # C, H, W = shape

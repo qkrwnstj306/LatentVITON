@@ -5,29 +5,12 @@
 *~
 
 ### dir ###
-ours
-ours_latents
-original
-results
-stableVITON
-s_l_VITON
-s_l_VITON_repaint
-test
-PCA_features_vis
-feature_map
-feature_map_s_l
+feature_map_dir
 dataset
-999_unmasked_dps_cfg_3
-999_unmasked_dps_t_cfg_3
-999_unmasked_mcg_cfg_3
-999_unmasked_mcg_t_cfg_3
 PCA_features_dir
 feature_map_dir
-masked_feature
-masked_feature_collect.py
 results_981
 results_999
-test2
 
 #### jho >>>>
 DATA
