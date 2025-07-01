@@ -94,7 +94,7 @@ model:
     cond_stage_config:
       target: ldm.modules.image_encoders.modules.FrozenCLIPImageEmbedder
       # target: ldm.modules.image_encoders.modules.DINOv2ImageEmbedder
-dataset_name: VITONHDDataset #VITONHDDataset / DresscodeDataset
+dataset_name: DresscodeDataset #VITONHDDataset / DresscodeDataset
 resume_path: ./ckpts/VITONHD_PBE_pose.ckpt
 default_prompt: ""
 log_images_kwargs:

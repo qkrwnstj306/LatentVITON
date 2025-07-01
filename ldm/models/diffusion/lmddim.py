@@ -6,7 +6,7 @@ from tqdm import tqdm
 from torch.autograd import grad
 
 from ldm.modules.diffusionmodules.util import make_ddim_sampling_parameters, make_ddim_timesteps, noise_like, extract_into_tensor
-
+import function_freq as ffq
 
 class LMDDIMSampler(object):
     def __init__(self, model, schedule="linear", **kwargs):
@@ -47,7 +47,7 @@ class LMDDIMSampler(object):
         self.register_buffer('ddim_alphas', ddim_alphas)
         self.register_buffer('ddim_alphas_prev', ddim_alphas_prev)
         self.register_buffer('ddim_sqrt_one_minus_alphas', np.sqrt(1. - ddim_alphas))
-        sigmas_for_original_sampling_steps = ddim_eta * torch.sqrt(
+        sigmas_for_original_sampling_steps = torch.sqrt(
             (1 - self.alphas_cumprod_prev) / (1 - self.alphas_cumprod) * (
                         1 - self.alphas_cumprod / self.alphas_cumprod_prev))
         self.register_buffer('ddim_sigmas_for_original_num_steps', sigmas_for_original_sampling_steps)
@@ -100,16 +100,6 @@ class LMDDIMSampler(object):
                 pred_x0, eps = outs
                 
                 img = (img - (1 - a_t).sqrt() * eps) * (a_t_next.sqrt() / a_t.sqrt()) + (1 - a_t_next).sqrt() * eps
-
-                # img2 = self.model.decode_first_stage(pred_x0)[0]
-                # img2 = (img2 + 1.0) / 2.0
-                # img2 = img2.clamp(0, 1)
-                # import os 
-                # from torchvision.utils import save_image
-                # # 저장 경로
-                # save_dir = f"./output_t"
-                # os.makedirs(save_dir, exist_ok=True)
-                # save_image(img2, os.path.join(save_dir, f"output_t{index}.png"))
             
         return img * lm_mask + (1. - lm_mask) * torch.randn(shape, device=device)
             
@@ -143,6 +133,10 @@ class LMDDIMSampler(object):
                lmgrad=None,
                lm_mask=None,
                use_ddim_inversion=False,
+               use_pure_to_prior=False,
+               add_noise=False,
+               apply_stochastic_noise=False,
+               replacement=False, mcg=False, dps=False, noisy_mcg=False, noisy_dps=False, treg=False,
                **kwargs
                ):
         if conditioning is not None:
@@ -189,8 +183,45 @@ class LMDDIMSampler(object):
                                                     lmgrad=lmgrad,
                                                     lm_mask=lm_mask,
                                                     use_ddim_inversion=use_ddim_inversion,
+                                                    use_pure_to_prior=use_pure_to_prior,
+                                                    add_noise=add_noise,
+                                                    apply_stochastic_noise=apply_stochastic_noise,
+                                                    replacement=replacement, mcg=mcg, dps=dps, noisy_mcg=noisy_mcg, noisy_dps=noisy_dps, treg=treg,
                                                     )
         return samples, intermediates, cond_output_dict
+
+    @torch.no_grad()
+    def pure_to_prior(self, cond, x_T=None, ddim_use_original_steps=True, quantize_denoised=False, x0=None,
+                      temperature=1., noise_dropout=0., score_corrector=None, corrector_kwargs=None,
+                      unconditional_guidance_scale=1., unconditional_conditioning=None, dynamic_threshold=None,
+                      apply_lm=False, lmgrad=None, lm_mask=None, add_noise=False):
+        
+        last_time_step = 999
+        b, C, H, W= x_T.shape
+        device = x_T.device
+        index = last_time_step
+        ts = torch.full((b,), last_time_step, device=device, dtype=torch.long)
+        size = (b, C, H, W)
+        img = torch.randn(size, device=device) # pure
+
+        outs = self.p_sample_ddim(img, cond, ts, index=index, use_original_steps=ddim_use_original_steps,
+                                quantize_denoised=quantize_denoised, temperature=temperature,
+                                noise_dropout=noise_dropout, score_corrector=score_corrector,
+                                corrector_kwargs=corrector_kwargs,
+                                unconditional_guidance_scale=unconditional_guidance_scale,
+                                unconditional_conditioning=unconditional_conditioning,
+                                dynamic_threshold=dynamic_threshold,
+                                apply_lm=apply_lm, lmgrad=lmgrad, lm_mask=lm_mask, x0=x0)
+        sample, pred_x0, _ = outs
+        img = sample # x_{t-1}
+        noise = noise_like(size, device, False)
+
+        if add_noise:
+            img = (1. - self.betas[last_time_step]).sqrt() * img + self.betas[last_time_step].sqrt() * noise
+
+        # img = lm_mask * x_T + (1. - lm_mask) * img
+        
+        return img
 
     @torch.no_grad()
     def ddim_sampling(self, cond, shape,
@@ -200,12 +231,13 @@ class LMDDIMSampler(object):
                       temperature=1., noise_dropout=0., score_corrector=None, corrector_kwargs=None,
                       unconditional_guidance_scale=1., unconditional_conditioning=None, dynamic_threshold=None,
                       ucg_schedule=None, predicted_x0=None,
-                      apply_lm=False, lmgrad=None, lm_mask=None, use_ddim_inversion=False):
+                      apply_lm=False, lmgrad=None, lm_mask=None, use_ddim_inversion=False, use_pure_to_prior=False, add_noise=False, apply_stochastic_noise=False,
+                      replacement=False, mcg=False, dps=False, noisy_mcg=False, noisy_dps=False, treg=False):
         device = self.model.betas.device
         b = shape[0]
         if x_T is None:
             img = torch.randn(shape, device=device)
-        elif use_ddim_inversion:
+        elif use_ddim_inversion: # 0 -> T
             img = self.inversion(cond, shape, callback=callback, img_callback=img_callback, quantize_denoised=quantize_denoised,
                                 mask=mask, x0=x0, ddim_use_original_steps=False, noise_dropout=noise_dropout, temperature=temperature,
                                 score_corrector=score_corrector, corrector_kwargs=corrector_kwargs, x_T=x_T, log_every_t=log_every_t, unconditional_guidance_scale=unconditional_guidance_scale,
@@ -213,6 +245,13 @@ class LMDDIMSampler(object):
                                 predicted_x0=predicted_x0, apply_lm=apply_lm, lmgrad=lmgrad, lm_mask=lm_mask, use_ddim_inversion=use_ddim_inversion)
         else:
             img = x_T
+        
+        """Pure to Prior"""
+        if use_pure_to_prior:
+            img = self.pure_to_prior(cond, x_T=x_T, ddim_use_original_steps=True, quantize_denoised=quantize_denoised, x0=x0,
+                        temperature=temperature, noise_dropout=noise_dropout, score_corrector=score_corrector, corrector_kwargs=corrector_kwargs,
+                        unconditional_guidance_scale=unconditional_guidance_scale, unconditional_conditioning=unconditional_conditioning, dynamic_threshold=dynamic_threshold,
+                        apply_lm=False, lmgrad=lmgrad, lm_mask=lm_mask, add_noise=add_noise)
 
         if timesteps is None:
             timesteps = self.ddpm_num_timesteps if ddim_use_original_steps else self.ddim_timesteps
@@ -236,27 +275,54 @@ class LMDDIMSampler(object):
             if ucg_schedule is not None:
                 assert len(ucg_schedule) == len(time_range)
                 unconditional_guidance_scale = ucg_schedule[i]
+            with torch.no_grad() if not (mcg or dps or noisy_mcg or noisy_dps) else torch.enable_grad():
+                if mcg or dps or noisy_mcg or noisy_dps:
+                    assert img.size(0) == 1
+                    img = img.requires_grad_()
+                outs = self.p_sample_ddim(img, cond, ts, index=index, use_original_steps=ddim_use_original_steps,
+                                        quantize_denoised=quantize_denoised, temperature=temperature,
+                                        noise_dropout=noise_dropout, score_corrector=score_corrector,
+                                        corrector_kwargs=corrector_kwargs,
+                                        unconditional_guidance_scale=unconditional_guidance_scale,
+                                        unconditional_conditioning=unconditional_conditioning,
+                                        dynamic_threshold=dynamic_threshold,
+                                        treg=treg,
+                                        apply_lm=apply_lm, lmgrad=lmgrad, lm_mask=lm_mask, x0=x0, apply_stochastic_noise=apply_stochastic_noise)
+                sample, pred_x0, cond_output_dict = outs
 
-            outs = self.p_sample_ddim(img, cond, ts, index=index, use_original_steps=ddim_use_original_steps,
-                                    quantize_denoised=quantize_denoised, temperature=temperature,
-                                    noise_dropout=noise_dropout, score_corrector=score_corrector,
-                                    corrector_kwargs=corrector_kwargs,
-                                    unconditional_guidance_scale=unconditional_guidance_scale,
-                                    unconditional_conditioning=unconditional_conditioning,
-                                    dynamic_threshold=dynamic_threshold,
-                                    apply_lm=apply_lm, lmgrad=lmgrad, lm_mask=lm_mask, x0=x0)
-            sample, pred_x0, cond_output_dict = outs
-            img = sample
+                if mask is not None:
+                    mask = mask.round()
 
-            if mask is not None: # 처음에는 inference.py에서 교체해주니까 필요없다.
-                assert x0 is not None
-                if len(time_range) - 1 != i:
-                    prev_ts = torch.full((b,), time_range[i+1], device=device, dtype=torch.long)
-                    img_orig = self.model.q_sample(x0, prev_ts)
+                alphas_prev = self.model.alphas_cumprod_prev if ddim_use_original_steps else self.ddim_alphas_prev
+                a_prev = torch.full((b, 1, 1, 1), alphas_prev[index], device=device)
+                if mcg or dps:
+                    norm = torch.norm((x0 * mask) - (pred_x0 * mask))
+                    norm_grad = grad(outputs=norm, inputs=img)[0]
+                    img = sample - norm_grad
+                elif noisy_mcg or noisy_dps:
+                    if len(time_range) - 1 != i:
+                        prev_ts = torch.full((b,), time_range[i+1], device=device, dtype=torch.long)
+                        img_orig = self.model.q_sample(x0, prev_ts)
+                    else:
+                        img_orig = x0
+                    norm = torch.norm((img_orig * mask) - (sample * mask))
+                    norm_grad = grad(outputs=norm, inputs=img)[0]
+                    img = sample - norm_grad
                 else:
-                    img_orig = x0
+                    img = sample
+
+            if mask is not None and (replacement or mcg or noisy_mcg):
+                assert x0 is not None
+                if replacement or mcg:
+                    if len(time_range) - 1 != i:
+                        prev_ts = torch.full((b,), time_range[i+1], device=device, dtype=torch.long)
+                        img_orig = self.model.q_sample(x0, prev_ts)
+                    else:
+                        img_orig = x0
                 img = img_orig * mask + (1. - mask) * img
-            
+        
+            img.detach_()
+
             if callback: callback(i)
             if predicted_x0 and step == 999: predicted_x0(pred_x0)
             
@@ -272,12 +338,10 @@ class LMDDIMSampler(object):
                 alphas = self.model.alphas_cumprod if ddim_use_original_steps else self.ddim_alphas
                 alphas_prev = self.model.alphas_cumprod_prev if ddim_use_original_steps else self.ddim_alphas_prev
                 sqrt_one_minus_alphas = self.model.sqrt_one_minus_alphas_cumprod if ddim_use_original_steps else self.ddim_sqrt_one_minus_alphas
-                sigmas = self.model.ddim_sigmas_for_original_num_steps if ddim_use_original_steps else self.ddim_sigmas
 
                 device = cond_output.device
                 a_t = torch.full((b, 1, 1, 1), alphas[0], device=device)
                 a_prev = torch.full((b, 1, 1, 1), alphas_prev[0], device=device)
-                sigma_t = torch.full((b, 1, 1, 1), sigmas[0], device=device)
                 sqrt_one_minus_at = torch.full((b, 1, 1, 1), sqrt_one_minus_alphas[0], device=device)
 
                 c = cond_output_dict["cond_input"]
@@ -292,22 +356,21 @@ class LMDDIMSampler(object):
                 cond_output_dict[f"cond_sample"] = cond_output
         return img, intermediates, cond_output_dict
 
-    @torch.no_grad()
+    # @torch.no_grad()
     def p_sample_ddim(self, x, c, t, index, repeat_noise=False, use_original_steps=False, quantize_denoised=False,
                       temperature=1., noise_dropout=0., score_corrector=None, corrector_kwargs=None,
                       unconditional_guidance_scale=1., unconditional_conditioning=None,
                       dynamic_threshold=None,
-                      apply_lm=False, lmgrad=None, lm_mask=None, x0=None, get_eps=False):
+                      treg=False,
+                      apply_lm=False, lmgrad=None, lm_mask=None, x0=None, apply_stochastic_noise=False, get_eps=False):
         b, *_, device = *x.shape, x.device
         
         alphas = self.model.alphas_cumprod if use_original_steps else self.ddim_alphas
         alphas_prev = self.model.alphas_cumprod_prev if use_original_steps else self.ddim_alphas_prev
         sqrt_one_minus_alphas = self.model.sqrt_one_minus_alphas_cumprod if use_original_steps else self.ddim_sqrt_one_minus_alphas
-        sigmas = self.model.ddim_sigmas_for_original_num_steps if use_original_steps else self.ddim_sigmas
         # select parameters corresponding to the currently considered timestep
         a_t = torch.full((b, 1, 1, 1), alphas[index], device=device)
         a_prev = torch.full((b, 1, 1, 1), alphas_prev[index], device=device)
-        sigma_t = torch.full((b, 1, 1, 1), sigmas[index], device=device)
         sqrt_one_minus_at = torch.full((b, 1, 1, 1), sqrt_one_minus_alphas[index],device=device)
         
         if unconditional_conditioning is None or unconditional_guidance_scale == 1.:
@@ -348,15 +411,46 @@ class LMDDIMSampler(object):
             if get_eps:
                 return pred_x0, e_t
             
-            """Apply Latent Manipulation"""
-            if apply_lm and ((index + 1) % 3 == 0 or index == 0):
+            if treg and ((index + 1) % 3 == 0 or index == 0):
+                assert apply_lm == False, "TREG is not compatible with Latent Manipulation"
                 with torch.enable_grad():
                     updated_pred_x0 = lmgrad.cal_grad(pred_x0=pred_x0, model=self.model, index=index)
+                
+                pred_x0 = a_prev * updated_pred_x0 + (1. - a_prev) * pred_x0 
 
+
+            """Apply Latent Manipulation"""
+            if apply_lm and ((index + 1) % 3 == 0 or index == 0):
+                assert treg == False, "Latent Manipulation is not compatible with TREG"
+
+                updated_pred_x0 = lmgrad.hard_consistency(pred_x0=pred_x0, model=self.model, index=index)
+
+                """Plot"""
+                # import os 
+                # from torchvision.utils import save_image
+                # measure = lmgrad.measurement
+                # measure_mask = lmgrad.mask
+                # measure = (measure + 1.0) / 2.0
+                # measure = measure.clamp(0, 1)
+                # save_dir = f"./figure"
+                # os.makedirs(save_dir, exist_ok=True)
+                # save_image(measure, os.path.join(save_dir, f"measurement.png"))
+                # save_image(measure_mask, os.path.join(save_dir, f"measurement_mask.png"))
                 if index==0:
                     return updated_pred_x0, pred_x0, cond_output_dict
+
                 else: # 원본의 특성을 보존하면서, 업데이트가 필요한 부분만 최적화하는 방식으로 적합합니다. Encoding과정에서 masked region에서의 일부 정보가 손실될 수 있기 때문에, 기존 latent code 정보를 그대로 사용한다.
+                    updated_pred_x0 = ffq.replace_high_frequency_fft(updated_pred_x0, pred_x0)
                     pred_x0 = lm_mask * ( a_prev * updated_pred_x0 + (1. - a_prev) * pred_x0 ) + (1. - lm_mask) * pred_x0
+                    
+                    #pred_x0 = a_prev * updated_pred_x0 + (1. - a_prev) * pred_x0
+                    #pred_x0 = updated_pred_x0 
+                    
+                     
+                    #high_freq = ffq.extract_high_frequency_fft(pred_x0)
+                    #low_freq = ffq.remove_high_frequency_fft(pred_x0)
+                    # new_updated_pred_x0 = ffq.replace_high_frequency_fft(updated_pred_x0, pred_x0)
+                    # replaced_freq = lm_mask * ( a_prev * new_updated_pred_x0 + (1. - a_prev) * pred_x0 ) + (1. - lm_mask) * pred_x0
                 
                 """Plot Pred_x0"""
                 # img = self.model.decode_first_stage(pred_x0)[0]
@@ -365,9 +459,9 @@ class LMDDIMSampler(object):
                 # import os 
                 # from torchvision.utils import save_image
                 # # 저장 경로
-                # save_dir = f"./updated_output_t2"
+                # save_dir = f"./figure/unmasked_masked_restore" #hard_consistency, interpolation, masked_restore, unmasked_masked_restore
                 # os.makedirs(save_dir, exist_ok=True)
-                # save_image(img, os.path.join(save_dir, f"output_t{t}.png"))
+                # save_image(img, os.path.join(save_dir, f"output_{t}.png"))
                 
         else:
             pred_x0 = self.model.predict_start_from_z_and_v(x, t, model_output)
@@ -379,12 +473,23 @@ class LMDDIMSampler(object):
             raise NotImplementedError()
 
         # direction pointing to x_t
-        dir_xt = (1. - a_prev - sigma_t**2).sqrt() * e_t
-        noise = sigma_t * noise_like(x.shape, device, repeat_noise) * temperature
-        if noise_dropout > 0.:
-            noise = torch.nn.functional.dropout(noise, p=noise_dropout)
-        x_prev = a_prev.sqrt() * pred_x0 + dir_xt + noise
+        """Stochastic Noise""" # iter를 맞춰줘야 한다.
+        if apply_stochastic_noise and ((index + 1) % 3 == 0 and index > 15):
+            # Inter
+            stochastic_e_t = (1. - a_prev).sqrt() * a_prev.sqrt() * noise_like(x.shape, device, False) 
+            x_prev = a_prev.sqrt() * pred_x0 + (1. - a_prev) * e_t + stochastic_e_t
+        else:
+            dir_xt = (1. - a_prev).sqrt() * e_t
+            x_prev = a_prev.sqrt() * pred_x0 + dir_xt 
 
+        """Naive reverse process"""
+        # dir_xt = (1. - a_prev).sqrt() * e_t
+        # x_prev = a_prev.sqrt() * pred_x0 + dir_xt 
+        if use_original_steps:
+            sigmas = self.ddim_sigmas_for_original_num_steps
+            sigmas_t = torch.full((b, 1, 1, 1), sigmas[index], device=device)
+            dir_xt = (1. - a_prev - sigmas_t**2).sqrt() * e_t
+            x_prev = a_prev.sqrt() * pred_x0 + dir_xt + sigmas_t * noise_like(x.shape, device, False)
         if index == 0:
             return pred_x0, pred_x0, cond_output_dict 
         return x_prev, pred_x0, cond_output_dict

@@ -11,6 +11,13 @@ PCA_features_dir
 feature_map_dir
 results_981
 results_999
+diffusers_vae/
+figure/
+intro_figure/
+mse_test.py
+mse_test2.py
+output.png
+vae_test.py
 
 #### jho >>>>
 DATA

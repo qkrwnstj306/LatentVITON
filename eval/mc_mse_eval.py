@@ -103,7 +103,7 @@ if __name__ == "__main__":
     mask_dir = '/home/qkrwnstj/StableVITON/dataset/zalando-hd-resized/test/agnostic-mask'
     generated_img_extension = '.jpg'
 
-    dir_name = "999_unmasked_lm_1e5_wo_dc_cfg_1"
+    dir_name = "999_ddpmPrior_woNoise_cfg1"
     generated_dir_dict = {
         'pair': f'/home/qkrwnstj/StableVITON/{dir_name}/pair',
         'unpair': f'/home/qkrwnstj/StableVITON/{dir_name}/unpair'

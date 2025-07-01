@@ -38,10 +38,22 @@ def build_args():
     parser.add_argument("--seed", type=int, default=23)
     parser.add_argument("--img_callback", action="store_true")
     parser.add_argument("--predicted_x0", action="store_true")
+
+    # Our Method
     parser.add_argument("--code_name", type=str, default="pure") # Create novel z_0
-    parser.add_argument("--apply_re", action="store_true") # replacement method
     parser.add_argument("--apply_lm", action="store_true") # latent manipulation by controlling predicted x_0
+    parser.add_argument("--use_pure_to_prior", action="store_true")
+    parser.add_argument("--add_noise", action="store_true") # add noise into prior noise
+    parser.add_argument("--apply_stochastic_noise", action="store_true")
     parser.add_argument("--use_ddim_inversion", action="store_true")
+
+    # Exisiting inverse solvers
+    parser.add_argument("--replacement", action="store_true")
+    parser.add_argument("--mcg", action="store_true")
+    parser.add_argument("--dps", action="store_true")
+    parser.add_argument("--noisy_mcg", action="store_true")
+    parser.add_argument("--noisy_dps", action="store_true")
+    parser.add_argument("--treg", action="store_true")
 
     parser.add_argument("--sampling_schedule", type=str, default="uniform")
     args = parser.parse_args()
@@ -106,7 +118,9 @@ def main(args):
         sampler.model.batch = batch
 
         ts = torch.full((1,), 999, device=z.device, dtype=torch.long)
-        start_code, mask = get_code(model, z, ts, c, batch, code_name=args.code_name, apply_re=args.apply_re)
+        start_code, mask = get_code(model, z, ts, c, batch, code_name=args.code_name)
+        if not (args.replacement or args.mcg or args.noisy_mcg):
+            mask = None # replacement x
 
         img_callback_fn = None
         predicted_x0_fn = None
@@ -139,8 +153,10 @@ def main(args):
 
         img = rearrange(batch['image'], 'b h w c -> b c h w')
         agn_inversion_mask = rearrange(batch['agn_mask'], 'b h w c -> b c h w')
+        agn_inversion_mask = agn_inversion_mask.round()
         measurement = img * agn_inversion_mask
         lm_mask = torch.cat([c["first_stage_cond"]], dim=1)[:, 4, ...].unsqueeze(1)
+        lm_mask = lm_mask.round()
         lmgrad.set_input(measurement=measurement, mask=agn_inversion_mask)
         samples, _, _ = sampler.sample(
             args.denoise_steps,
@@ -157,10 +173,19 @@ def main(args):
             predicted_x0=predicted_x0_fn,
             sampling_schedule=args.sampling_schedule,
             unconditional_guidance_scale=args.cfg_scale,
-            apply_lm=args.apply_lm, 
-            lmgrad=lmgrad,
-            lm_mask=lm_mask,
-            use_ddim_inversion=args.use_ddim_inversion,
+            apply_lm=args.apply_lm, # apply our method 
+            lmgrad=lmgrad, # latent manipulation class
+            lm_mask=lm_mask, # latent mask 
+            use_ddim_inversion=args.use_ddim_inversion, 
+            use_pure_to_prior=args.use_pure_to_prior,
+            add_noise=args.add_noise, # ddpm prior + noise 
+            apply_stochastic_noise=args.apply_stochastic_noise, # stochastic noise
+            replacement=args.replacement,
+            mcg=args.mcg, 
+            dps=args.dps,
+            noisy_mcg=args.noisy_mcg,
+            noisy_dps=args.noisy_dps,
+            treg=args.treg,
         )
         
         lmgrad.set_init()

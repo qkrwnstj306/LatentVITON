@@ -106,27 +106,42 @@ def main_worker(args):
     config = build_config(args)
     OmegaConf.save(config, args.config_save_path)
     model = create_model(args.config_path, config=config).cpu()
+
+    """Original code for ATV loss"""
     if args.resume_path is not None:
         if not args.no_strict_load:
-            # 체크포인트 로드
-            state_dict = load_state_dict(args.resume_path, location="cpu")
-
-            # `cond_stage_model.transformer` 관련 키 삭제
-            keys_to_remove = [key for key in state_dict.keys() if key.startswith("cond_stage_model.transformer")]
-            for key in keys_to_remove:
-                del state_dict[key]
-
-            # 모델에 state_dict 적용
-            model.load_state_dict(state_dict, strict=False)
-            print(f"Removed {len(keys_to_remove)} keys related to cond_stage_model.transformer")
-            #model.load_state_dict(load_state_dict(args.resume_path, location="cpu"))
+            model.load_state_dict(load_state_dict(args.resume_path, location="cpu"))
         else:
             model.load_state_dict(load_state_dict(args.resume_path, location="cpu"), strict=False)
     elif config.resume_path is not None:
         if not args.no_strict_load:
             model.load_state_dict(load_state_dict(config.resume_path, location="cpu"))
+
         else:
             model.load_state_dict(load_state_dict(config.resume_path, location="cpu"), strict=False)
+    """For DINOv2 image encoder"""
+    # if args.resume_path is not None:
+    #     if not args.no_strict_load:
+    #         # 체크포인트 로드
+    #         state_dict = load_state_dict(args.resume_path, location="cpu")
+
+    #         # `cond_stage_model.transformer` 관련 키 삭제
+    #         keys_to_remove = [key for key in state_dict.keys() if key.startswith("cond_stage_model.transformer")]
+    #         for key in keys_to_remove:
+    #             del state_dict[key]
+
+    #         # 모델에 state_dict 적용
+    #         model.load_state_dict(state_dict, strict=False)
+    #         print(f"Removed {len(keys_to_remove)} keys related to cond_stage_model.transformer")
+    #         #model.load_state_dict(load_state_dict(args.resume_path, location="cpu"))
+    #     else:
+    #         model.load_state_dict(load_state_dict(args.resume_path, location="cpu"), strict=False)
+    # elif config.resume_path is not None:
+    #     if not args.no_strict_load:
+    #         model.load_state_dict(load_state_dict(config.resume_path, location="cpu"))
+
+    #     else:
+    #         model.load_state_dict(load_state_dict(config.resume_path, location="cpu"), strict=False)
         
     # finetuned vae load
     if args.vae_load_path is not None:

@@ -5,7 +5,8 @@ CODE_NAME = [
     "unmasked_wrp",
     "unmasked_statistics",
     "unmasked_offset",
-    "unmasked_clothingAlignment"
+    "unmasked_clothingAlignment",
+    "smooth_latent"
 ]
 
 import torch
@@ -13,11 +14,12 @@ import torch.nn.functional as F
 from torchvision import transforms
 from einops import rearrange
 
-def get_code(model, z, ts, c, batch, code_name="pure", apply_re=False):
+def get_code(model, z, ts, c, batch, code_name="pure"):
     bs, shape = z.shape[0], z.shape[1:]  # (B, C, H, W)
     C, H, W = shape
 
     mask = torch.cat([c["first_stage_cond"]], dim=1)[:, 4, ...].unsqueeze(1)
+    mask = mask.round()
 
     assert code_name in CODE_NAME
     if code_name == "pure":
@@ -53,7 +55,7 @@ def get_code(model, z, ts, c, batch, code_name="pure", apply_re=False):
         noise = torch.randn(size, device=z.device) + 0.1 * torch.randn((bs, C, 1, 1), device=z.device)
         alleviated = model.q_sample(z, ts)
         start_code = noise * (1 - mask) + alleviated * mask
-
+    
     elif code_name == "unmasked_statistics":
         def initialize_masked_region(latent, mask, stats_path="./masked_feature/clothing_statistics.pth"):
             stats = torch.load(stats_path, map_location="cpu")
@@ -64,6 +66,27 @@ def get_code(model, z, ts, c, batch, code_name="pure", apply_re=False):
 
         start_code = initialize_masked_region(z, mask)
         start_code = model.q_sample(start_code, ts)
+    
+    elif code_name == "smooth_latent":
+        # 1) measurement 영역 주변 latent를 gaussian blur(또는 dilated avg)로 smooth
+        def smooth_latent(latent, kernel_size=7, sigma=3):
+            channels = latent.shape[1]
+            x = torch.arange(kernel_size).float() - kernel_size // 2
+            kernel_1d = torch.exp(-(x**2) / (2 * sigma**2))
+            kernel_1d /= kernel_1d.sum()
+            kernel_2d = kernel_1d[:, None] * kernel_1d[None, :]
+            kernel_2d = kernel_2d.expand(channels, 1, kernel_size, kernel_size).to(latent.device)
+            return F.conv2d(latent, kernel_2d, padding=kernel_size // 2, groups=channels)
+
+        z_T = model.q_sample(z, ts)
+        # 2) measurement 영역만 latent 남기고 masked 영역은 0으로 만들기
+        z_meas_only = z_T * mask
+
+        # 3) measurement 영역 latent를 부드럽게 확장 (mask boundary 주변 포함)
+        z_smooth = smooth_latent(z_meas_only)
+
+        # 4) masked 영역을 z_smooth로 대체
+        start_code = z_T * mask + z_smooth * (1 - mask)
 
     elif code_name == "unmasked_clothingAlignment":
         def get_center_of_mask(mask):
@@ -188,8 +211,5 @@ def get_code(model, z, ts, c, batch, code_name="pure", apply_re=False):
 
     else:
         raise ValueError(f"Unknown code_name: {code_name}")
-
-    if not apply_re:
-        mask = None
-
+    
     return start_code, mask

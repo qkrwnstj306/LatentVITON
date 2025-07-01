@@ -85,7 +85,7 @@ if __name__ == "__main__":
                          '/home/qkrwnstj/StableVITON/ours_latents/pair',
                          '/home/qkrwnstj/StableVITON/s_l_VITON/pair',
                          '/home/qkrwnstj/StableVITON/s_l_VITON_repaint/pair',
-                         '/home/qkrwnstj/StableVITON/999_unmasked_lm_1e5_wo_dc_cfg_1/pair',
+                         '/home/qkrwnstj/StableVITON/999_pure51step_cfg1/pair',
                          ]
     
     generated_dir = generated_dir_lst[6]
