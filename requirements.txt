@@ -1,0 +1,53 @@
+git clone https://github.com/qkrwnstj306/LatentVITON.git
+
+cd StableVITON
+
+scp -P 9010 -r qkrwnstj@210.94.179.16:~/StableVITON/dataset/DressCode_1024/upper ./
+
+mkdir -p dataset/DressCode_1024
+
+mv ./upper ./dataset/DressCode_1024
+
+rm -r ckpts 
+
+scp -P 9010 -r qkrwnstj@210.94.179.16:~/StableVITON/ckpts ./
+
+wget https://repo.anaconda.com/archive/Anaconda3-2021.05-Linux-x86_64.sh
+
+bash Anaconda3-2021.05-Linux-x86_64.sh
+
+(터미널 재시작)
+
+conda create --name StableVITON python=3.10 -y
+
+conda activate StableVITON
+
+pip install torch==2.0.0+cu117 torchvision==0.15.1+cu117 torchaudio==2.0.1 --index-url https://download.pytorch.org/whl/cu117
+pip install pytorch-lightning==1.5.0
+pip install einops
+pip install opencv-python==4.7.0.72
+pip install matplotlib
+pip install omegaconf
+pip install albumentations
+pip install transformers==4.33.2
+pip install xformers==0.0.19
+pip install triton==2.0.0
+pip install open-clip-torch==2.19.0
+pip install diffusers==0.20.2
+pip install scipy==1.10.1
+pip install scikit-learn
+pip install umap-learn
+pip install scikit-image
+pip install clean-fid
+conda install -c anaconda ipython -y
+
+
+/home/gpu_02/anaconda3/envs/StableVITON/lib/python3.10/site-packages/diffusers/utils/dynamic_modules_utils.py
+
+L28: cached_download 삭제
+L285: cached_download -> hf_hub_download 교체
+
+
+bash nohup_train.sh 
+
+scp -P 9010 -r /home/gpu_02/LatentVITON/logs/20250704_test/models qkrwnstj@210.94.179.16:~/StableVITON/models/school_server
